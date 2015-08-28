@@ -857,11 +857,16 @@ promote_ssa_mode (const_tree name, int *punsignedp)
   if (SSA_NAME_VAR (name)
       && (TREE_CODE (SSA_NAME_VAR (name)) == PARM_DECL
 	  || TREE_CODE (SSA_NAME_VAR (name)) == RESULT_DECL))
-    return promote_decl_mode (SSA_NAME_VAR (name), punsignedp);
+    {
+      machine_mode mode = promote_decl_mode (SSA_NAME_VAR (name), punsignedp);
+      if (mode != BLKmode)
+	return mode;
+    }
 
   tree type = TREE_TYPE (name);
   int unsignedp = TYPE_UNSIGNED (type);
-  machine_mode mode = TYPE_MODE (type);
+  /* Bypass TYPE_MODE, as it may map some vector modes to BLKmode.  */
+  machine_mode mode = type->type_common.mode;
 
   machine_mode pmode = promote_mode (type, mode, &unsignedp);
   if (punsignedp)
