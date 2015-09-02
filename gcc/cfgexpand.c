@@ -186,7 +186,11 @@ set_rtl (tree t, rtx x)
 				  && (REG_P (XEXP (x, 0))
 				      || SUBREG_P (XEXP (x, 0)))
 				  && (REG_P (XEXP (x, 1))
-				      || SUBREG_P (XEXP (x, 1)))))
+				      || SUBREG_P (XEXP (x, 1))))
+			      || (GET_CODE (x) == PARALLEL
+				  && SSAVAR (t)
+				  && TREE_CODE (SSAVAR (t)) == RESULT_DECL
+				  && !flag_tree_coalesce_vars))
 			   : (MEM_P (x) || x == pc_rtx
 			      || (GET_CODE (x) == CONCAT
 				  && MEM_P (XEXP (x, 0))

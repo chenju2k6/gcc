@@ -865,8 +865,14 @@ promote_ssa_mode (const_tree name, int *punsignedp)
 
   tree type = TREE_TYPE (name);
   int unsignedp = TYPE_UNSIGNED (type);
-  /* Bypass TYPE_MODE, as it may map some vector modes to BLKmode.  */
-  machine_mode mode = type->type_common.mode;
+  machine_mode mode = TYPE_MODE (type);
+
+  /* Bypass TYPE_MODE when it maps vector modes to BLKmode.  */
+  if (mode == BLKmode)
+    {
+      gcc_assert (VECTOR_TYPE_P (type));
+      mode = type->type_common.mode;
+    }
 
   machine_mode pmode = promote_mode (type, mode, &unsignedp);
   if (punsignedp)
