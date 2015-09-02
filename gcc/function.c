@@ -5067,7 +5067,7 @@ expand_function_start (tree subr)
 	     aggregate_value_p, so we may see a PARALLEL or a REG.  */
 	  if (REG_P (hard_reg))
 	    set_parm_rtl (res, gen_reg_rtx (GET_MODE (hard_reg)));
-	  else if (flag_tree_coalesce_vars)
+	  else if (flag_tree_coalesce_vars && is_gimple_reg (res))
 	    {
 	      tree def = ssa_default_def (cfun, res);
 	      gcc_assert (def);
