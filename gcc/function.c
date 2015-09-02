@@ -3557,11 +3557,12 @@ assign_bounds (vec<bounds_parm_data> &bndargs,
 	set_decl_incoming_rtl (pbdata->bounds_parm,
 			       pbdata->parm_data.entry_parm, false);
 
-	if (assign_parm_setup_block_p (&pbdata->parm_data))
+	bool use_reg = use_register_for_decl (pbdata->bounds_parm);
+
+	if (!use_reg && assign_parm_setup_block_p (&pbdata->parm_data))
 	  assign_parm_setup_block (&all, pbdata->bounds_parm,
 				   &pbdata->parm_data);
-	else if (pbdata->parm_data.passed_pointer
-		 || use_register_for_decl (pbdata->bounds_parm))
+	else if (use_reg || pbdata->parm_data.passed_pointer)
 	  assign_parm_setup_reg (&all, pbdata->bounds_parm,
 				 &pbdata->parm_data);
 	else
@@ -3673,9 +3674,11 @@ assign_parms (tree fndecl)
 	}
       else
 	{
-	  if (assign_parm_setup_block_p (&data))
+	  bool use_reg = use_register_for_decl (parm);
+
+	  if (!use_reg && assign_parm_setup_block_p (&data))
 	    assign_parm_setup_block (&all, parm, &data);
-	  else if (data.passed_pointer || use_register_for_decl (parm))
+	  else if (use_reg || data.passed_pointer)
 	    assign_parm_setup_reg (&all, parm, &data);
 	  else
 	    assign_parm_setup_stack (&all, parm, &data);
