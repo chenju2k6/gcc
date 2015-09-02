@@ -1110,8 +1110,6 @@ create_outofssa_var_map (coalesce_list_p cl, bitmap used_in_copy)
 
 	    case GIMPLE_RETURN:
 	      {
-		if (!FLAG_COALESCE_RESULTS)
-		  break;
 		tree res = DECL_RESULT (current_function_decl);
 		if (VOID_TYPE_P (TREE_TYPE (res))
 		    || !is_gimple_reg (res))
@@ -1467,12 +1465,6 @@ gimple_can_coalesce_p (tree name1, tree name2)
       var2 = SSA_NAME_VAR (name2);
       if (var1 == var2)
 	return true;
-
-      /* Do not coalesce RESULT_DECLs if that's disabled.  */
-      if (!FLAG_COALESCE_RESULTS
-	  && ((var1 && TREE_CODE (var1) == RESULT_DECL)
-	      || (var2 && TREE_CODE (var2) == RESULT_DECL)))
-	return false;
 
       /* We don't want to coalesce two SSA names if one of the base
 	 variables is supposed to be a register while the other is
