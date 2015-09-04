@@ -3929,6 +3929,51 @@ On x86-32 targets, the @code{stdcall} attribute causes the compiler to
 assume that the called function pops off the stack space used to
 pass arguments, unless it takes a variable number of arguments.
 
+@item interrupt
+@cindex @code{interrupt} function attribute, x86
+Use this attribute to indicate that the specified void function without
+arguments is an interrupt handler.  The compiler generates function
+entry and exit sequences suitable for use in an interrupt handler when
+this attribute is present.  The @code{IRET} instruction, instead of the
+@code{RET} instruction, is used to return from interrupt handlers.  All
+registers, except for the EFLAGS register which is restored by the
+@code{IRET} instruction, are preserved by the compiler.  The red zone
+isn't supported in the interrupted function; that is an interrupt
+handler may access stack within 128 bytes of the current stack pointer.
+
+You can use the builtin @code{__builtin_interrupt_data} function to
+access the interrupt data pushed onto the stack by processor:
+
+@smallexample
+void
+f () __attribute__ ((interrupt))
+@{
+  void *p = __builtin_interrupt_data ();
+  ...
+@}
+@end smallexample
+
+@item exception
+@cindex @code{exception} function attribute, x86
+Use @code{exception} instead of @code{interrupt} for handlers intended
+to be used for @code{exception} (i.e.@: those that must pop
+@code{ERROR_CODE} off the stack before the @code{IRET} instruction).
+
+You can use the builtin @code{__builtin_exception_error} function to
+access the exception error code pushed onto the stack by processor as
+well as the builtin @code{__builtin_interrupt_data} function to access
+the exception data on stack:
+
+@smallexample
+void
+f () __attribute__ ((exception))
+@{
+  unsigned int error = __builtin_exception_error ();
+  void *p = __builtin_interrupt_data ();
+  ...
+@}
+@end smallexample
+
 @item syscall_linkage
 @cindex @code{syscall_linkage} function attribute, IA-64
 This attribute is used to modify the IA-64 calling convention by marking
@@ -15930,6 +15975,21 @@ The following built-in function is always available.
 @item void __builtin_ia32_pause (void)
 Generates the @code{pause} machine instruction with a compiler memory
 barrier.
+
+@item void *__builtin_interrupt_data (void)
+Returns a pointer to the return address pushed onto the stack by
+processor.
+
+The @code{__builtin_frame_address} builtin isn't suitable for interrupt
+and exception handlers since it returns the stack frame address on the
+callee side and compiler may generate a new stack frame for stack
+alignment.
+
+@item unsigned int __builtin_exception_error (void)
+@itemx unsigned long long int __builtin_exception_error (void)
+Returns the exception error code pushed onto the stack by processor.
+Its return value is 64 bits in 64-bit mode and 32 bits in 32-bit mode.
+This builtin function can only be used in exception handler.
 @end table
 
 The following floating-point built-in functions are made available in the

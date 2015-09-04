@@ -2404,6 +2404,8 @@ struct ix86_frame
 {
   int nsseregs;
   int nregs;
+  int nbndregs;
+  int nmaskregs;
   int va_arg_size;
   int red_zone_size;
   int outgoing_arguments_size;
@@ -4500,6 +4502,10 @@ ix86_offload_options (void)
   return xstrdup ("-foffload-abi=ilp32");
 }
 
+/* Number registers which must be preserved for interrupt return.  */
+
+unsigned int ix86_interrupt_return_nregs;
+
 /* Update register usage after having seen the compiler flags.  */
 
 static void
@@ -4571,6 +4577,22 @@ ix86_conditional_register_usage (void)
   if (! TARGET_MPX)
     for (i = FIRST_BND_REG; i <= LAST_BND_REG; i++)
       fixed_regs[i] = call_used_regs[i] = 1, reg_names[i] = "";
+
+  /* All integer and vector registers, except for MMX and x87
+     registers which aren't supported in ix86_compute_frame_layout
+     when saving and restoring registers, are preserved in
+     interrupt handler.  Skip BP and SP registers since they are
+     always preserved.  */
+  unsigned int n = 0;
+  for (i = 0; i < FIRST_PSEUDO_REGISTER; i++)
+    if (reg_names[i][0]
+	&& !STACK_REGNO_P (i)
+	&& !MMX_REGNO_P (i)
+	&& i != BP_REG
+	&& i != SP_REG
+	&& (i <= ST7_REG || i >= XMM0_REG))
+      n++;
+  ix86_interrupt_return_nregs = n;
 }
 
 
@@ -5288,6 +5310,14 @@ ix86_set_current_function (tree fndecl)
       return;
     }
 
+  if (lookup_attribute ("exception", DECL_ATTRIBUTES (fndecl)))
+    {
+      cfun->machine->is_interrupt = true;
+      cfun->machine->is_exception = true;
+    }
+  else if (lookup_attribute ("interrupt", DECL_ATTRIBUTES (fndecl)))
+    cfun->machine->is_interrupt = true;
+
   tree new_tree = DECL_FUNCTION_SPECIFIC_TARGET (fndecl);
   if (new_tree == NULL_TREE)
     new_tree = target_option_default_node;
@@ -5565,6 +5595,11 @@ ix86_function_ok_for_sibcall (tree decl, tree exp)
 {
   tree type, decl_or_type;
   rtx a, b;
+
+  /* Sibling call isn't OK in interrupt handler since it must return
+     with the "IRET" instruction.  */
+  if (cfun->machine->is_interrupt)
+    return false;
 
   /* If we are generating position-independent code, we cannot sibcall
      optimize direct calls to global functions, as the PLT requires
@@ -6762,6 +6797,7 @@ type_natural_mode (const_tree type, const CUMULATIVE_ARGS *cum,
 		      }
 		  }
 		else if ((size == 8 && !TARGET_64BIT)
+			 && (!cfun || !cfun->machine->is_interrupt)
 			 && !TARGET_MMX
 			 && !TARGET_IAMCU)
 		  {
@@ -9782,7 +9818,10 @@ ix86_can_use_return_insn_p (void)
 {
   struct ix86_frame frame;
 
-  if (! reload_completed || frame_pointer_needed)
+  /* Don't use `ret' instruction in interrupt handler.  */
+  if (! reload_completed
+      || frame_pointer_needed
+      || cfun->machine->is_interrupt)
     return 0;
 
   /* Don't allow more than 32k pop, since that's all we can do
@@ -10099,6 +10138,23 @@ ix86_select_alt_pic_regnum (void)
 static bool
 ix86_save_reg (unsigned int regno, bool maybe_eh_return)
 {
+  /* In interrupt handler, we don't preserve MMX and x87 registers
+     which aren't supported when saving and restoring registers.  No
+     need to preserve callee-saved registers unless they are modified.
+     We also preserve all caller-saved registers if a function call
+     is made in interrupt handler since the called function may change
+     them.  Don't explicitly save BP and SP registers since they are
+     always preserved.   */
+  if (cfun->machine->is_interrupt)
+    return ((df_regs_ever_live_p (regno)
+	     || (call_used_regs[regno] && cfun->machine->make_calls))
+	    && !fixed_regs[regno]
+	    && !STACK_REGNO_P (regno)
+	    && !MMX_REGNO_P (regno)
+	    && regno != BP_REG
+	    && regno != SP_REG
+	    && (regno <= ST7_REG || regno >= XMM0_REG));
+
   if (regno == REAL_PIC_OFFSET_TABLE_REGNUM
       && pic_offset_table_rtx)
     {
@@ -10155,6 +10211,34 @@ ix86_nsaved_regs (void)
   return nregs;
 }
 
+/* Return number of saved bound registers.  */
+
+static int
+ix86_nsaved_bndregs (void)
+{
+  int nregs = 0;
+  int regno;
+
+  for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
+    if (BND_REGNO_P (regno) && ix86_save_reg (regno, true))
+      nregs ++;
+  return nregs;
+}
+
+/* Return number of saved mask registers.  */
+
+static int
+ix86_nsaved_maskregs (void)
+{
+  int nregs = 0;
+  int regno;
+
+  for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
+    if (MASK_REGNO_P (regno) && ix86_save_reg (regno, true))
+      nregs ++;
+  return nregs;
+}
+
 /* Return number of saved SSE registrers.  */
 
 static int
@@ -10163,7 +10247,8 @@ ix86_nsaved_sseregs (void)
   int nregs = 0;
   int regno;
 
-  if (!TARGET_64BIT_MS_ABI)
+  /* Always need to save SSE registrers in interrupt handler.  */
+  if (!TARGET_64BIT_MS_ABI && !cfun->machine->is_interrupt)
     return 0;
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     if (SSE_REGNO_P (regno) && ix86_save_reg (regno, true))
@@ -10232,6 +10317,18 @@ ix86_builtin_setjmp_frame_value (void)
 
 #define SPLIT_STACK_AVAILABLE 256
 
+/* Register save area size.  */
+
+static unsigned int
+ix86_reg_save_area_size (struct ix86_frame *frame)
+{
+  unsigned int size = ((frame->nregs - frame->nbndregs
+			- frame->nmaskregs) * UNITS_PER_WORD);
+  size += frame->nbndregs * (ix86_pmode == PMODE_DI ? 16 : 8);
+  size += frame->nmaskregs * (TARGET_AVX512BW ? 8 : 2);
+  return size;
+}
+
 /* Fill structure ix86_frame about frame of currently computed function.  */
 
 static void
@@ -10244,6 +10341,8 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
   HOST_WIDE_INT to_allocate;
 
   frame->nregs = ix86_nsaved_regs ();
+  frame->nbndregs = ix86_nsaved_bndregs ();
+  frame->nmaskregs = ix86_nsaved_maskregs ();
   frame->nsseregs = ix86_nsaved_sseregs ();
 
   /* 64-bit MS ABI seem to require stack alignment to be always 16 except for
@@ -10315,11 +10414,16 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
 	   = !expensive_function_p (count);
     }
 
+  /* We must use move to save bound and mask registers.  */
   frame->save_regs_using_mov
-    = (TARGET_PROLOGUE_USING_MOVE && cfun->machine->use_fast_prologue_epilogue
-       /* If static stack checking is enabled and done with probes,
-	  the registers need to be saved before allocating the frame.  */
-       && flag_stack_check != STATIC_BUILTIN_STACK_CHECK);
+    = (frame->nbndregs > 0
+       || frame->nmaskregs > 0
+       || (TARGET_PROLOGUE_USING_MOVE
+	   && cfun->machine->use_fast_prologue_epilogue
+	   /* If static stack checking is enabled and done with probes,
+	      the registers need to be saved before allocating the
+	      frame.  */
+	   && flag_stack_check != STATIC_BUILTIN_STACK_CHECK));
 
   /* Skip return address.  */
   offset = UNITS_PER_WORD;
@@ -10337,7 +10441,7 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
   frame->hard_frame_pointer_offset = offset;
 
   /* Register save area */
-  offset += frame->nregs * UNITS_PER_WORD;
+  offset += ix86_reg_save_area_size (frame);
   frame->reg_save_offset = offset;
 
   /* On SEH target, registers are pushed just before the frame pointer
@@ -10351,9 +10455,17 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
       /* The only ABI that has saved SSE registers (Win64) also has a
          16-byte aligned default stack, and thus we don't need to be
 	 within the re-aligned local stack frame to save them.  */
-      gcc_assert (INCOMING_STACK_BOUNDARY >= 128);
-      offset = (offset + 16 - 1) & -16;
-      offset += frame->nsseregs * 16;
+      if (cfun->machine->is_interrupt)
+	/* We must save full vector registers in interrupt handler.  */
+	offset += frame->nsseregs * (TARGET_AVX512F
+				     ? 64
+				     : (TARGET_AVX ? 32 : 16));
+      else
+	{
+	  gcc_assert (INCOMING_STACK_BOUNDARY >= 128);
+	  offset = (offset + 16 - 1) & -16;
+	  offset += frame->nsseregs * 16;
+	}
     }
   frame->sse_reg_save_offset = offset;
 
@@ -10409,8 +10521,12 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
   /* Size prologue needs to allocate.  */
   to_allocate = offset - frame->sse_reg_save_offset;
 
-  if ((!to_allocate && frame->nregs <= 1)
-      || (TARGET_64BIT && to_allocate >= (HOST_WIDE_INT) 0x80000000))
+  /* We must use move to save bound and mask registers.  */
+  if (frame->nbndregs == 0
+      && frame->nmaskregs == 0
+      && ((!to_allocate && frame->nregs <= 1)
+	   || (TARGET_64BIT
+	       && to_allocate >= (HOST_WIDE_INT) 0x80000000)))
     frame->save_regs_using_mov = false;
 
   if (ix86_using_red_zone ()
@@ -10420,7 +10536,7 @@ ix86_compute_frame_layout (struct ix86_frame *frame)
     {
       frame->red_zone_size = to_allocate;
       if (frame->save_regs_using_mov)
-	frame->red_zone_size += frame->nregs * UNITS_PER_WORD;
+	frame->red_zone_size += ix86_reg_save_area_size (frame);
       if (frame->red_zone_size > RED_ZONE_SIZE - RED_ZONE_RESERVE)
 	frame->red_zone_size = RED_ZONE_SIZE - RED_ZONE_RESERVE;
     }
@@ -10580,8 +10696,14 @@ ix86_emit_save_reg_using_mov (machine_mode mode, unsigned int regno,
   addr = choose_baseaddr (cfa_offset);
   mem = gen_frame_mem (mode, addr);
 
-  /* For SSE saves, we need to indicate the 128-bit alignment.  */
-  set_mem_align (mem, GET_MODE_ALIGNMENT (mode));
+  /* For SSE saves, we need to indicate the 128-bit alignment.  In
+     interrupt handler, stack is only aligned to word_mode.  We can't
+     use gen_sse_storeups since RTX_FRAME_RELATED_P is set and
+     dwarf2out_flush_queued_reg_saves doesn't like UNSPEC_STOREU.
+     Also gen_sse_storeups doesn't cover AVX nor AVX512.  */
+  set_mem_align (mem,
+		 GET_MODE_ALIGNMENT (cfun->machine->is_interrupt
+				     ? word_mode : mode));
 
   insn = emit_move_insn (mem, reg);
   RTX_FRAME_RELATED_P (insn) = 1;
@@ -10643,8 +10765,9 @@ ix86_emit_save_regs_using_mov (HOST_WIDE_INT cfa_offset)
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     if (!SSE_REGNO_P (regno) && ix86_save_reg (regno, true))
       {
-        ix86_emit_save_reg_using_mov (word_mode, regno, cfa_offset);
-	cfa_offset -= UNITS_PER_WORD;
+	enum machine_mode reg_mode = GET_MODE (regno_reg_rtx[regno]);
+        ix86_emit_save_reg_using_mov (reg_mode, regno, cfa_offset);
+	cfa_offset -= GET_MODE_SIZE (reg_mode);
       }
 }
 
@@ -10654,12 +10777,26 @@ static void
 ix86_emit_save_sse_regs_using_mov (HOST_WIDE_INT cfa_offset)
 {
   unsigned int regno;
+  enum machine_mode vector_reg_mode;
+
+  if (cfun->machine->is_interrupt)
+    {
+      /* We must save full vector registers in interrupt handler.  */
+      if (TARGET_AVX512F)
+	vector_reg_mode = V16SFmode;
+      else if (TARGET_AVX)
+	vector_reg_mode = V8SFmode;
+      else
+	vector_reg_mode = V4SFmode;
+    }
+  else
+    vector_reg_mode = V4SFmode;
 
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     if (SSE_REGNO_P (regno) && ix86_save_reg (regno, true))
       {
-	ix86_emit_save_reg_using_mov (V4SFmode, regno, cfa_offset);
-	cfa_offset -= 16;
+	ix86_emit_save_reg_using_mov (vector_reg_mode, regno, cfa_offset);
+	cfa_offset -= GET_MODE_SIZE (vector_reg_mode);
       }
 }
 
@@ -11606,6 +11743,13 @@ ix86_expand_prologue (void)
     {
       int align_bytes = crtl->stack_alignment_needed / BITS_PER_UNIT;
 
+      /* Can't use DRAP if the address of interrupt/exception data has
+         been taken.  */
+      if (cfun->machine->interrupt_data_taken)
+	sorry ("%<__builtin_interrupt_data%> not supported with"
+	       " stack realignment.  This may be worked around by"
+	       " adding -maccumulate-outgoing-arg.");
+
       /* Only need to push parameter pointer reg if it is caller saved.  */
       if (!call_used_regs[REGNO (crtl->drap_reg)])
 	{
@@ -12104,11 +12248,12 @@ ix86_emit_restore_regs_using_mov (HOST_WIDE_INT cfa_offset,
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     if (!SSE_REGNO_P (regno) && ix86_save_reg (regno, maybe_eh_return))
       {
-	rtx reg = gen_rtx_REG (word_mode, regno);
+	enum machine_mode reg_mode = GET_MODE (regno_reg_rtx[regno]);
+	rtx reg = gen_rtx_REG (reg_mode, regno);
 	rtx insn, mem;
 
 	mem = choose_baseaddr (cfa_offset);
-	mem = gen_frame_mem (word_mode, mem);
+	mem = gen_frame_mem (reg_mode, mem);
 	insn = emit_move_insn (reg, mem);
 
         if (m->fs.cfa_reg == crtl->drap_reg && regno == REGNO (crtl->drap_reg))
@@ -12127,7 +12272,7 @@ ix86_emit_restore_regs_using_mov (HOST_WIDE_INT cfa_offset,
 	else
 	  ix86_add_cfa_restore_note (NULL_RTX, reg, cfa_offset);
 
-	cfa_offset -= UNITS_PER_WORD;
+	cfa_offset -= GET_MODE_SIZE (reg_mode);
       }
 }
 
@@ -12138,21 +12283,39 @@ ix86_emit_restore_sse_regs_using_mov (HOST_WIDE_INT cfa_offset,
 				      bool maybe_eh_return)
 {
   unsigned int regno;
+  enum machine_mode vector_reg_mode;
+
+  if (cfun->machine->is_interrupt)
+    {
+      /* We must restore full vector registers in interrupt handler.  */
+      if (TARGET_AVX512F)
+	vector_reg_mode = V16SFmode;
+      else if (TARGET_AVX)
+	vector_reg_mode = V8SFmode;
+      else
+	vector_reg_mode = V4SFmode;
+    }
+  else
+    vector_reg_mode = V4SFmode;
+
 
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     if (SSE_REGNO_P (regno) && ix86_save_reg (regno, maybe_eh_return))
       {
-	rtx reg = gen_rtx_REG (V4SFmode, regno);
+	rtx reg = gen_rtx_REG (vector_reg_mode, regno);
 	rtx mem;
 
 	mem = choose_baseaddr (cfa_offset);
-	mem = gen_rtx_MEM (V4SFmode, mem);
-	set_mem_align (mem, 128);
+	mem = gen_rtx_MEM (vector_reg_mode, mem);
+	/* In interrupt handler, stack is only aligned to word_mode. */
+	set_mem_align (mem, (cfun->machine->is_interrupt
+			     ? GET_MODE_ALIGNMENT (word_mode)
+			     : 128));
 	emit_move_insn (reg, mem);
 
 	ix86_add_cfa_restore_note (NULL_RTX, reg, cfa_offset);
 
-	cfa_offset -= 16;
+	cfa_offset -= GET_MODE_SIZE (vector_reg_mode);
       }
 }
 
@@ -12216,8 +12379,9 @@ ix86_expand_epilogue (int style)
   if (crtl->calls_eh_return && style != 2)
     frame.reg_save_offset -= 2 * UNITS_PER_WORD;
 
-  /* EH_RETURN requires the use of moves to function properly.  */
-  if (crtl->calls_eh_return)
+  /* EH_RETURN requires the use of moves to function properly.  We must
+     use move to restore bound and mask registers.  */
+  if (crtl->calls_eh_return || frame.nbndregs > 0 || frame.nmaskregs > 0)
     restore_regs_via_mov = true;
   /* SEH requires the use of pops to identify the epilogue.  */
   else if (TARGET_SEH)
@@ -12457,7 +12621,18 @@ ix86_expand_epilogue (int style)
       return;
     }
 
-  if (crtl->args.pops_args && crtl->args.size)
+  if (cfun->machine->is_interrupt)
+    {
+      /* Return with the "IRET" instruction from interrupt handler.
+         Pop the 'ERROR_CODE' off the stack before the 'IRET'
+	 instruction in exception handler.  */
+      if (cfun->machine->is_exception)
+	emit_insn (ix86_gen_add3 (gen_rtx_REG (Pmode, SP_REG),
+				  gen_rtx_REG (Pmode, SP_REG),
+				  GEN_INT (UNITS_PER_WORD)));
+      emit_insn (gen_interrupt_return ());
+    }
+  else if (crtl->args.pops_args && crtl->args.size)
     {
       rtx popc = GEN_INT (crtl->args.pops_args);
 
@@ -17529,6 +17704,13 @@ ix86_expand_move (machine_mode mode, rtx operands[])
   rtx op0, op1;
   enum tls_model model;
 
+  if (cfun->machine->is_interrupt && IS_STACK_MODE (mode))
+    {
+      error ("80387 instructions aren't allowed in %s service routine",
+	     (cfun->machine->is_exception ? "exception" : "interrupt"));
+      return;
+    }
+
   op0 = operands[0];
   op1 = operands[1];
 
@@ -17675,6 +17857,13 @@ ix86_expand_vector_move (machine_mode mode, rtx operands[])
 {
   rtx op0 = operands[0], op1 = operands[1];
   unsigned int align = GET_MODE_ALIGNMENT (mode);
+
+  if (cfun->machine->is_interrupt && VALID_MMX_REG_MODE (mode))
+    {
+      error ("MMX/3Dnow instructions aren't allowed in %s service routine",
+	     (cfun->machine->is_exception ? "exception" : "interrupt"));
+      return;
+    }
 
   if (push_operand (op0, VOIDmode))
     op0 = emit_move_resolve_push (mode, op0);
@@ -25925,6 +26114,8 @@ ix86_expand_call (rtx retval, rtx fnaddr, rtx callarg1,
   if (use)
     CALL_INSN_FUNCTION_USAGE (call) = use;
 
+  cfun->machine->make_calls = true;
+
   return call;
 }
 
@@ -30888,6 +31079,12 @@ enum ix86_builtins
   IX86_BUILTIN_READ_FLAGS,
   IX86_BUILTIN_WRITE_FLAGS,
 
+  /* Get the address of interrupt or exception data.  */
+  IX86_BUILTIN_INTERRUPT_DATA,
+
+  /* Get the exception error code.  */
+  IX86_BUILTIN_EXCEPTION_ERROR,
+
   IX86_BUILTIN_MAX
 };
 
@@ -34499,6 +34696,15 @@ ix86_init_mmx_sse_builtins (void)
 	       VOID_FTYPE_PCVOID_UNSIGNED_UNSIGNED, IX86_BUILTIN_MONITORX);
   def_builtin (OPTION_MASK_ISA_MWAITX, "__builtin_ia32_mwaitx",
 	       VOID_FTYPE_UNSIGNED_UNSIGNED_UNSIGNED, IX86_BUILTIN_MWAITX);
+
+  /* Get the address of interrupt or exception data.  */
+  def_builtin (0, "__builtin_interrupt_data",
+	       PVOID_FTYPE_VOID, IX86_BUILTIN_INTERRUPT_DATA);
+
+  /* Get the exception error code.  */
+  def_builtin (0, "__builtin_exception_error",
+	       TARGET_64BIT ? UINT64_FTYPE_VOID : UNSIGNED_FTYPE_VOID,
+	       IX86_BUILTIN_EXCEPTION_ERROR);
 
   /* Add FMA4 multi-arg argument instructions */
   for (i = 0, d = bdesc_multi_arg; i < ARRAY_SIZE (bdesc_multi_arg); i++, d++)
@@ -40441,6 +40647,47 @@ rdseed_step:
       emit_insn (gen_xabort (op0));
       return 0;
 
+    case IX86_BUILTIN_INTERRUPT_DATA:
+      cfun->machine->interrupt_data_taken = true;
+
+      if (!target
+	  || GET_MODE (target) != Pmode
+	  || !register_operand (target, Pmode))
+	target = gen_reg_rtx (Pmode);
+
+      if (cfun->machine->is_exception)
+	/* The address of interrupt data is at (AP) in the current
+	   frame in exception handler.  */
+	emit_insn (gen_rtx_SET (target, arg_pointer_rtx));
+      else
+	/* The address of interrupt data is at -WORD(AP) in the current
+	   frame in interrupt handler.  */
+	emit_insn (gen_rtx_SET (target,
+				plus_constant (Pmode, arg_pointer_rtx,
+					       -UNITS_PER_WORD)));
+      return target;
+
+    case IX86_BUILTIN_EXCEPTION_ERROR:
+      if (!cfun->machine->is_exception)
+	{
+	  error ("%<__builtin_exception_error%> can only be used in "
+		 "exception service routine");
+	  return const0_rtx;
+	}
+
+      if (!target
+	  || GET_MODE (target) != word_mode
+	  || !register_operand (target, word_mode))
+	target = gen_reg_rtx (word_mode);
+
+      /* Load the error code from -WORD(AP) in the current frame in
+	 exception handler.  */
+      emit_move_insn (target, gen_rtx_MEM (word_mode,
+					   plus_constant (Pmode,
+							  arg_pointer_rtx,
+							  -UNITS_PER_WORD)));
+      return target;
+
     default:
       break;
     }
@@ -43164,6 +43411,35 @@ ix86_handle_fndecl_attribute (tree *node, tree name, tree, int,
                name);
       *no_add_attrs = true;
     }
+  return NULL_TREE;
+}
+
+
+static tree
+ix86_handle_interrupt_attribute (tree *node, tree name, tree, int,
+				 bool *no_add_attrs)
+{
+  if (TREE_CODE (*node) != FUNCTION_DECL)
+    {
+      warning (OPT_Wattributes, "%qE attribute only applies to functions",
+	       name);
+      *no_add_attrs = true;
+    }
+
+  bool interrupt = is_attribute_p ("interrupt", name);
+
+  /* DECL_RESULT and DECL_ARGUMENTS do not exist there yet,
+     but the function type contains args and return type data.  */
+  tree func_type = TREE_TYPE (*node);
+  tree first_arg_type = TYPE_ARG_TYPES (func_type);
+  tree return_type = TREE_TYPE (func_type);
+  if (first_arg_type && ! VOID_TYPE_P (TREE_VALUE (first_arg_type)))
+    error ("%s service routine can't have arguments",
+	   interrupt ? "interrupt" : "exception");
+  if (! VOID_TYPE_P (return_type))
+    error ("%s service routine can't have non-void return value",
+	   interrupt ? "interrupt" : "exception");
+
   return NULL_TREE;
 }
 
@@ -47052,6 +47328,11 @@ static const struct attribute_spec ix86_attribute_table[] =
     false },
   { "callee_pop_aggregate_return", 1, 1, false, true, true,
     ix86_handle_callee_pop_aggregate_return, true },
+  { "interrupt", 0, 0, true, false, false,
+    ix86_handle_interrupt_attribute, false },
+  { "exception", 0, 0, true, false, false,
+    ix86_handle_interrupt_attribute, false },
+
   /* End element.  */
   { NULL,        0, 0, false, false, false, NULL, false }
 };
