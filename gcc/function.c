@@ -2907,7 +2907,7 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       else
 	{
 	  concat_reg = reg;
-	  reg = gen_reg_rtx (mode_for_size (GET_MODE_SIZE (mode),
+	  reg = gen_reg_rtx (mode_for_size (GET_MODE_SIZE (mode) * BITS_PER_UNIT,
 					    MODE_INT, 0));
 	  stack_parm = gen_lowpart_SUBREG (mode, reg);
 	}
