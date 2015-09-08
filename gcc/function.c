@@ -2895,7 +2895,7 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
   /* If we want the parameter in a pseudo, don't use a stack slot.  */
   if (is_gimple_reg (parm) && use_register_for_decl (parm))
     {
-      stack_parm = gen_rtx_REG (promote_ssa_mode (parm, NULL));
+      stack_parm = gen_reg_rtx (promote_ssa_mode (parm, NULL));
       data->stack_parm = NULL;
     }
 
