@@ -2886,6 +2886,7 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
 {
   rtx entry_parm = data->entry_parm;
   rtx stack_parm = data->stack_parm;
+  rtx concat_reg = NULL_RTX;
   HOST_WIDE_INT size;
   HOST_WIDE_INT size_stored;
 
@@ -2898,7 +2899,18 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       tree def = ssa_default_def (cfun, parm);
       gcc_assert (def);
       machine_mode mode = promote_ssa_mode (def, NULL);
-      stack_parm = gen_reg_rtx (mode);
+      rtx reg = gen_reg_rtx (mode);
+      if (GET_CODE (reg) != CONCAT)
+	stack_parm = reg;
+      else if (stack_parm)
+	concat_reg = reg;
+      else
+	{
+	  concat_reg = reg;
+	  reg = gen_reg_rtx (mode_for_size (GET_MODE_SIZE (mode),
+					    MODE_INT, 0));
+	  stack_parm = gen_lowpart_SUBREG (mode, reg);
+	}
       data->stack_parm = NULL;
     }
 
@@ -3022,6 +3034,12 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       all->first_conversion_insn = get_insns ();
       all->last_conversion_insn = get_last_insn ();
       end_sequence ();
+    }
+
+  if (concat_reg)
+    {
+      emit_move_insn (concat_reg, stack_parm);
+      stack_parm = concat_reg;
     }
 
   data->stack_parm = stack_parm;
