@@ -2892,6 +2892,13 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
   if (GET_CODE (entry_parm) == PARALLEL)
     entry_parm = emit_group_move_into_temps (entry_parm);
 
+  /* If we want the parameter in a pseudo, don't use a stack slot.  */
+  if (is_gimple_reg (parm) && use_register_for_decl (parm))
+    {
+      stack_parm = gen_rtx_REG (promote_ssa_mode (parm, NULL));
+      data->stack_parm = NULL;
+    }
+
   size = int_size_in_bytes (data->passed_type);
   size_stored = CEIL_ROUND (size, UNITS_PER_WORD);
   if (stack_parm == 0)
@@ -3557,12 +3564,11 @@ assign_bounds (vec<bounds_parm_data> &bndargs,
 	set_decl_incoming_rtl (pbdata->bounds_parm,
 			       pbdata->parm_data.entry_parm, false);
 
-	bool use_reg = use_register_for_decl (pbdata->bounds_parm);
-
-	if (!use_reg && assign_parm_setup_block_p (&pbdata->parm_data))
+	if (assign_parm_setup_block_p (&pbdata->parm_data))
 	  assign_parm_setup_block (&all, pbdata->bounds_parm,
 				   &pbdata->parm_data);
-	else if (use_reg || pbdata->parm_data.passed_pointer)
+	else if (pbdata->parm_data.passed_pointer
+		 || use_register_for_decl (pbdata->bounds_parm))
 	  assign_parm_setup_reg (&all, pbdata->bounds_parm,
 				 &pbdata->parm_data);
 	else
@@ -3674,11 +3680,9 @@ assign_parms (tree fndecl)
 	}
       else
 	{
-	  bool use_reg = use_register_for_decl (parm);
-
-	  if (!use_reg && assign_parm_setup_block_p (&data))
+	  if (assign_parm_setup_block_p (&data))
 	    assign_parm_setup_block (&all, parm, &data);
-	  else if (use_reg || data.passed_pointer)
+	  else if (data.passed_pointer || use_register_for_decl (parm))
 	    assign_parm_setup_reg (&all, parm, &data);
 	  else
 	    assign_parm_setup_stack (&all, parm, &data);
