@@ -5066,13 +5066,22 @@ expand_function_start (tree subr)
   else if (DECL_MODE (res) == VOIDmode)
     /* If return mode is void, this decl rtl should not be used.  */
     set_parm_rtl (res, NULL_RTX);
-  else
+  /* If we might be coalescing this result, make sure it has the
+     expected mode.  */
+  else 
     {
       /* Compute the return values into a pseudo reg, which we will copy
 	 into the true return register after the cleanups are done.  */
       tree return_type = TREE_TYPE (res);
-      if (TYPE_MODE (return_type) != BLKmode
-	  && targetm.calls.return_in_msb (return_type))
+      if (flag_tree_coalesce_vars && is_gimple_reg (res))
+	{
+	  tree def = ssa_default_def (cfun, res);
+	  gcc_assert (def);
+	  machine_mode mode = promote_ssa_mode (def, NULL);
+	  set_parm_rtl (res, gen_reg_rtx (mode));
+	}
+      else if (TYPE_MODE (return_type) != BLKmode
+	       && targetm.calls.return_in_msb (return_type))
 	/* expand_function_end will insert the appropriate padding in
 	   this case.  Use the return value's natural (unpadded) mode
 	   within the function proper.  */
@@ -5086,19 +5095,7 @@ expand_function_start (tree subr)
 
 	  /* Structures that are returned in registers are not
 	     aggregate_value_p, so we may see a PARALLEL or a REG.  */
-	  if (flag_tree_coalesce_vars && is_gimple_reg (res))
-	    {
-	      tree def = ssa_default_def (cfun, res);
-	      gcc_assert (def);
-	      machine_mode mode = promote_ssa_mode (def, NULL);
-	      if (mode != GET_MODE (hard_reg))
-		{
-		  gcc_assert (VECTOR_MODE_P (mode));
-		  gcc_assert (GET_MODE (hard_reg) == BLKmode);
-		}
-	      set_parm_rtl (res, gen_reg_rtx (mode));
-	    }
-	  else if (REG_P (hard_reg))
+	  if (REG_P (hard_reg))
 	    set_parm_rtl (res, gen_reg_rtx (GET_MODE (hard_reg)));
 	  else
 	    {
