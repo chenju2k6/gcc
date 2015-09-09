@@ -203,7 +203,8 @@ set_rtl (tree t, rtx x)
      modes.  */
   gcc_checking_assert (!x || x == pc_rtx || TREE_CODE (t) != SSA_NAME
 		       || (SSAVAR (t) && !VAR_P (SSAVAR (t))
-			   && !use_register_for_decl (t))
+			   && (!flag_tree_coalesce_vars
+			       || !use_register_for_decl (t)))
 		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
 
   if (x && SSAVAR (t))
