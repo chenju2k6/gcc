@@ -196,15 +196,13 @@ set_rtl (tree t, rtx x)
 				  && MEM_P (XEXP (x, 0))
 				  && MEM_P (XEXP (x, 1))))));
   /* Check that the RTL for SSA_NAMEs and gimple-reg PARM_DECLs and
-     RESULT_DECLs has the expected mode.  For PARM_DECLs and
-     RESULT_DECLs, we'll have been called by set_parm_rtl, which will
-     give us the default def, so we don't have to compute it
-     ourselves.  For parms and results in memory, we accept unpromoted
-     modes.  */
+     RESULT_DECLs has the expected mode.  For memory, we accept
+     unpromoted modes, since that's what we're likely to get.  For
+     PARM_DECLs and RESULT_DECLs, we'll have been called by
+     set_parm_rtl, which will give us the default def, so we don't
+     have to compute it ourselves.  */
   gcc_checking_assert (!x || x == pc_rtx || TREE_CODE (t) != SSA_NAME
-		       || (SSAVAR (t) && !VAR_P (SSAVAR (t))
-			   && (!flag_tree_coalesce_vars
-			       || !use_register_for_decl (t)))
+		       || !use_register_for_decl (t)
 		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
 
   if (x && SSAVAR (t))
