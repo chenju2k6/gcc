@@ -200,8 +200,12 @@ set_rtl (tree t, rtx x)
      unpromoted modes, since that's what we're likely to get.  For
      PARM_DECLs and RESULT_DECLs, we'll have been called by
      set_parm_rtl, which will give us the default def, so we don't
-     have to compute it ourselves.  */
+     have to compute it ourselves.  For RESULT_DECLs, we accept mode
+     mismatches too, as long as we're not coalescing across variables,
+     so that we don't reject BLKmode PARALLELs or unpromoted REGs.  */
   gcc_checking_assert (!x || x == pc_rtx || TREE_CODE (t) != SSA_NAME
+		       || (SSAVAR (t) && TREE_CODE (SSAVAR (t)) == RESULT_DECL
+			   && !flag_tree_coalesce_vars)
 		       || !use_register_for_decl (t)
 		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
 
