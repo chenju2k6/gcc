@@ -5078,7 +5078,19 @@ expand_function_start (tree subr)
 	  tree def = ssa_default_def (cfun, res);
 	  gcc_assert (def);
 	  machine_mode mode = promote_ssa_mode (def, NULL);
-	  set_parm_rtl (res, gen_reg_rtx (mode));
+	  rtx x = gen_reg_rtx (mode);
+	  machine_mode dmode = promote_decl_mode (res, NULL);
+	  /* To avoid mode conflicts with vector types that promote to
+	     BLKmode, wrap the parm rtl in a PARALLEL.  We'll use the
+	     inner pseudo for the SSA mapping, and the BLKmode
+	     PARALLEL when expanding the result proper.  */
+	  if (mode != dmode)
+	    {
+	      gcc_assert (dmode == BLKmode);
+	      x = gen_rtx_EXPR_LIST (VOIDmode, x, const0_rtx);
+	      x = gen_rtx_PARALLEL (dmode, gen_rtvec (1, x));
+	    }
+	  set_parm_rtl (res, x);
 	}
       else if (TYPE_MODE (return_type) != BLKmode
 	       && targetm.calls.return_in_msb (return_type))

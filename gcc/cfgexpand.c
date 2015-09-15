@@ -178,23 +178,34 @@ leader_merge (tree cur, tree next)
 static inline void
 set_rtl (tree t, rtx x)
 {
-  gcc_checking_assert (!x
+  rtx xc = x;
+
+  /* Extract the single expr from a PARALLEL.  We want to record the
+     inner expr in the partition to pseudo mapping, and to use it for
+     the sanity checks below.  */
+  if (x && GET_CODE (x) == PARALLEL
+      && XVECLEN (x, 0) == 1
+      && GET_CODE (XVECEXP (x, 0, 0)) == EXPR_LIST
+      && XEXP (XVECEXP (x, 0, 0), 1) == const0_rtx)
+    xc = XEXP (XVECEXP (x, 0, 0), 0);
+
+  gcc_checking_assert (!xc
 		       || !(TREE_CODE (t) == SSA_NAME || is_gimple_reg (t))
 		       || (use_register_for_decl (t)
-			   ? (REG_P (x)
-			      || (GET_CODE (x) == CONCAT
-				  && (REG_P (XEXP (x, 0))
-				      || SUBREG_P (XEXP (x, 0)))
-				  && (REG_P (XEXP (x, 1))
-				      || SUBREG_P (XEXP (x, 1))))
-			      || (GET_CODE (x) == PARALLEL
+			   ? (REG_P (xc)
+			      || (GET_CODE (xc) == CONCAT
+				  && (REG_P (XEXP (xc, 0))
+				      || SUBREG_P (XEXP (xc, 0)))
+				  && (REG_P (XEXP (xc, 1))
+				      || SUBREG_P (XEXP (xc, 1))))
+			      || (GET_CODE (xc) == PARALLEL
 				  && SSAVAR (t)
 				  && TREE_CODE (SSAVAR (t)) == RESULT_DECL
 				  && !flag_tree_coalesce_vars))
-			   : (MEM_P (x) || x == pc_rtx
-			      || (GET_CODE (x) == CONCAT
-				  && MEM_P (XEXP (x, 0))
-				  && MEM_P (XEXP (x, 1))))));
+			   : (MEM_P (xc) || xc == pc_rtx
+			      || (GET_CODE (xc) == CONCAT
+				  && MEM_P (XEXP (xc, 0))
+				  && MEM_P (XEXP (xc, 1))))));
   /* Check that the RTL for SSA_NAMEs and gimple-reg PARM_DECLs and
      RESULT_DECLs has the expected mode.  For memory, we accept
      unpromoted modes, since that's what we're likely to get.  For
@@ -203,17 +214,17 @@ set_rtl (tree t, rtx x)
      have to compute it ourselves.  For RESULT_DECLs, we accept mode
      mismatches too, as long as we're not coalescing across variables,
      so that we don't reject BLKmode PARALLELs or unpromoted REGs.  */
-  gcc_checking_assert (!x || x == pc_rtx || TREE_CODE (t) != SSA_NAME
+  gcc_checking_assert (!xc || xc == pc_rtx || TREE_CODE (t) != SSA_NAME
 		       || (SSAVAR (t) && TREE_CODE (SSAVAR (t)) == RESULT_DECL
 			   && !flag_tree_coalesce_vars)
 		       || !use_register_for_decl (t)
-		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
+		       || GET_MODE (xc) == promote_ssa_mode (t, NULL));
 
-  if (x && SSAVAR (t))
+  if (xc && SSAVAR (t))
     {
       bool skip = false;
       tree cur = NULL_TREE;
-      rtx xm = x;
+      rtx xm = xc;
 
     retry:
       if (MEM_P (xm))
@@ -247,10 +258,10 @@ set_rtl (tree t, rtx x)
 
       if (cur != next)
 	{
-	  if (MEM_P (x))
-	    set_mem_attributes (x, next, true);
+	  if (MEM_P (xc))
+	    set_mem_attributes (xc, next, true);
 	  else
-	    set_reg_attrs_for_decl_rtl (next, x);
+	    set_reg_attrs_for_decl_rtl (next, xc);
 	}
     }
 
@@ -260,9 +271,9 @@ set_rtl (tree t, rtx x)
       if (part != NO_PARTITION)
 	{
 	  if (SA.partition_to_pseudo[part])
-	    gcc_assert (SA.partition_to_pseudo[part] == x);
-	  else if (x != pc_rtx)
-	    SA.partition_to_pseudo[part] = x;
+	    gcc_assert (SA.partition_to_pseudo[part] == xc);
+	  else if (xc != pc_rtx)
+	    SA.partition_to_pseudo[part] = xc;
 	}
       /* For the benefit of debug information at -O0 (where
          vartracking doesn't run) record the place also in the base
