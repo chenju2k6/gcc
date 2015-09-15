@@ -172,40 +172,40 @@ leader_merge (tree cur, tree next)
   return cur;
 }
 
+static rtx
+unwrap_parallel (rtx x)
+{
+  if (GET_CODE (x) == PARALLEL
+      && XVECLEN (x, 0) == 1
+      && GET_CODE (XVECEXP (x, 0, 0)) == EXPR_LIST
+      && XEXP (XVECEXP (x, 0, 0), 1) == const0_rtx)
+    return XEXP (XVECEXP (x, 0, 0), 0);
+
+  return x;
+}
+
 /* Associate declaration T with storage space X.  If T is no
    SSA name this is exactly SET_DECL_RTL, otherwise make the
    partition of T associated with X.  */
 static inline void
 set_rtl (tree t, rtx x)
 {
-  rtx xc = x;
-
-  /* Extract the single expr from a PARALLEL.  We want to record the
-     inner expr in the partition to pseudo mapping, and to use it for
-     the sanity checks below.  */
-  if (x && GET_CODE (x) == PARALLEL
-      && XVECLEN (x, 0) == 1
-      && GET_CODE (XVECEXP (x, 0, 0)) == EXPR_LIST
-      && XEXP (XVECEXP (x, 0, 0), 1) == const0_rtx)
-    xc = XEXP (XVECEXP (x, 0, 0), 0);
-
-  gcc_checking_assert (!xc
+  gcc_checking_assert (!x
 		       || !(TREE_CODE (t) == SSA_NAME || is_gimple_reg (t))
 		       || (use_register_for_decl (t)
-			   ? (REG_P (xc)
-			      || (GET_CODE (xc) == CONCAT
-				  && (REG_P (XEXP (xc, 0))
-				      || SUBREG_P (XEXP (xc, 0)))
-				  && (REG_P (XEXP (xc, 1))
-				      || SUBREG_P (XEXP (xc, 1))))
-			      || (GET_CODE (xc) == PARALLEL
-				  && SSAVAR (t)
-				  && TREE_CODE (SSAVAR (t)) == RESULT_DECL
-				  && !flag_tree_coalesce_vars))
-			   : (MEM_P (xc) || xc == pc_rtx
-			      || (GET_CODE (xc) == CONCAT
-				  && MEM_P (XEXP (xc, 0))
-				  && MEM_P (XEXP (xc, 1))))));
+			   ? (REG_P (x)
+			      || (GET_CODE (x) == CONCAT
+				  && (REG_P (XEXP (x, 0))
+				      || SUBREG_P (XEXP (x, 0)))
+				  && (REG_P (XEXP (x, 1))
+				      || SUBREG_P (XEXP (x, 1)))))
+			   : (MEM_P (x) || x == pc_rtx
+			      || (GET_CODE (x) == CONCAT
+				  && MEM_P (XEXP (x, 0))
+				  && MEM_P (XEXP (x, 1)))))
+		       || (GET_CODE (x) == PARALLEL
+			   && SSAVAR (t)
+			   && TREE_CODE (SSAVAR (t)) == RESULT_DECL));
   /* Check that the RTL for SSA_NAMEs and gimple-reg PARM_DECLs and
      RESULT_DECLs has the expected mode.  For memory, we accept
      unpromoted modes, since that's what we're likely to get.  For
@@ -214,17 +214,18 @@ set_rtl (tree t, rtx x)
      have to compute it ourselves.  For RESULT_DECLs, we accept mode
      mismatches too, as long as we're not coalescing across variables,
      so that we don't reject BLKmode PARALLELs or unpromoted REGs.  */
-  gcc_checking_assert (!xc || xc == pc_rtx || TREE_CODE (t) != SSA_NAME
+  gcc_checking_assert (!x || x == pc_rtx || TREE_CODE (t) != SSA_NAME
 		       || (SSAVAR (t) && TREE_CODE (SSAVAR (t)) == RESULT_DECL
 			   && !flag_tree_coalesce_vars)
 		       || !use_register_for_decl (t)
-		       || GET_MODE (xc) == promote_ssa_mode (t, NULL));
+		       || (GET_MODE (unwrap_parallel (x))
+			   == promote_ssa_mode (t, NULL)));
 
-  if (xc && SSAVAR (t))
+  if (x && SSAVAR (t))
     {
       bool skip = false;
       tree cur = NULL_TREE;
-      rtx xm = xc;
+      rtx xm = x;
 
     retry:
       if (MEM_P (xm))
@@ -258,10 +259,10 @@ set_rtl (tree t, rtx x)
 
       if (cur != next)
 	{
-	  if (MEM_P (xc))
-	    set_mem_attributes (xc, next, true);
+	  if (MEM_P (x))
+	    set_mem_attributes (x, next, true);
 	  else
-	    set_reg_attrs_for_decl_rtl (next, xc);
+	    set_reg_attrs_for_decl_rtl (next, x);
 	}
     }
 
@@ -271,9 +272,9 @@ set_rtl (tree t, rtx x)
       if (part != NO_PARTITION)
 	{
 	  if (SA.partition_to_pseudo[part])
-	    gcc_assert (SA.partition_to_pseudo[part] == xc);
-	  else if (xc != pc_rtx)
-	    SA.partition_to_pseudo[part] = xc;
+	    gcc_assert (SA.partition_to_pseudo[part] == x);
+	  else if (x != pc_rtx)
+	    SA.partition_to_pseudo[part] = x;
 	}
       /* For the benefit of debug information at -O0 (where
          vartracking doesn't run) record the place also in the base
@@ -285,7 +286,7 @@ set_rtl (tree t, rtx x)
 	{
 	  tree var = SSA_NAME_VAR (t);
 	  /* If we don't yet have something recorded, just record it now.  */
-	  if (!DECL_RTL_SET_P (var))
+ 	  if (!DECL_RTL_SET_P (var))
 	    SET_DECL_RTL (var, x);
 	  /* If we have it set already to "multiple places" don't
 	     change this.  */
@@ -6237,6 +6238,12 @@ pass_expand::execute (function *fun)
 	  gcc_assert (in);
 	  rtx out = SA.partition_to_pseudo[part];
 	  gcc_assert (in == out);
+
+	  /* Extract the single expr from a PARALLEL.  We want to
+	     record the inner expr in the partition to pseudo mapping,
+	     and to use it for the sanity checks below.  */
+	  SA.partition_to_pseudo[part] = unwrap_parallel (in);
+
 	  /* Now reset VAR's RTL to IN, so that the _EXPR attrs match
 	     those expected by debug backends for each parm and for
 	     the result.  This is particularly important for stabs,
