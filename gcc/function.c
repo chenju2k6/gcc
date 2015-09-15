@@ -2903,6 +2903,8 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       if (GET_CODE (reg) != CONCAT)
 	stack_parm = reg;
       else
+	/* FIXME: we could try to do away with the stack slot using an
+	   unsplit pseudo of some integral mode and some shifting.  */
 	concat_reg = reg;
       data->stack_parm = NULL;
     }
