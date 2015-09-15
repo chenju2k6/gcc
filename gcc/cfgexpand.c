@@ -6227,30 +6227,6 @@ pass_expand::execute (function *fun)
 	  rtx out = SA.partition_to_pseudo[part];
 	  gcc_assert (in == out);
 
-	  /* PARMs and RESULTs are laid out before activating
-	     function-specific target attributes, some of which may
-	     affect the set of available registers and vector modes.
-	     This may in turn cause TYPE_MODE to return different
-	     modes for the same type.  Within the function, we want to
-	     use function-specific modes, so promote_ssa_name will
-	     take the vector modes unchanged, but parms and decls,
-	     that interface with the rest of the translation unit,
-	     ought to use the general interface, or so it seems.
-	     Check!  */
-	  if (VECTOR_TYPE_P (TREE_TYPE (var))
-	      && GET_MODE (in) != DECL_MODE (var)
-	      && GET_MODE (in) != BLKmode)
-	    {
-	      gcc_assert (GET_MODE_SIZE (GET_MODE (in))
-			  == GET_MODE_SIZE (DECL_MODE (var)));
-	      if (REG_P (in))
-		in = gen_rtx_SUBREG (DECL_MODE (var), in, 0);
-	      else if (MEM_P (in))
-		in = change_address (in, DECL_MODE (var), 0);
-	      else
-		gcc_unreachable ();
-	    }
-
 	  /* Now reset VAR's RTL to IN, so that the _EXPR attrs match
 	     those expected by debug backends for each parm and for
 	     the result.  This is particularly important for stabs,
