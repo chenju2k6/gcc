@@ -172,18 +172,6 @@ leader_merge (tree cur, tree next)
   return cur;
 }
 
-static rtx
-unwrap_parallel (rtx x)
-{
-  if (GET_CODE (x) == PARALLEL
-      && XVECLEN (x, 0) == 1
-      && GET_CODE (XVECEXP (x, 0, 0)) == EXPR_LIST
-      && XEXP (XVECEXP (x, 0, 0), 1) == const0_rtx)
-    return XEXP (XVECEXP (x, 0, 0), 0);
-
-  return x;
-}
-
 /* Associate declaration T with storage space X.  If T is no
    SSA name this is exactly SET_DECL_RTL, otherwise make the
    partition of T associated with X.  */
@@ -198,14 +186,15 @@ set_rtl (tree t, rtx x)
 				  && (REG_P (XEXP (x, 0))
 				      || SUBREG_P (XEXP (x, 0)))
 				  && (REG_P (XEXP (x, 1))
-				      || SUBREG_P (XEXP (x, 1)))))
+				      || SUBREG_P (XEXP (x, 1))))
+			      || (GET_CODE (x) == PARALLEL
+				  && SSAVAR (t)
+				  && TREE_CODE (SSAVAR (t)) == RESULT_DECL
+				  && !flag_tree_coalesce_vars))
 			   : (MEM_P (x) || x == pc_rtx
 			      || (GET_CODE (x) == CONCAT
 				  && MEM_P (XEXP (x, 0))
-				  && MEM_P (XEXP (x, 1)))))
-		       || (GET_CODE (x) == PARALLEL
-			   && SSAVAR (t)
-			   && TREE_CODE (SSAVAR (t)) == RESULT_DECL));
+				  && MEM_P (XEXP (x, 1))))));
   /* Check that the RTL for SSA_NAMEs and gimple-reg PARM_DECLs and
      RESULT_DECLs has the expected mode.  For memory, we accept
      unpromoted modes, since that's what we're likely to get.  For
@@ -218,8 +207,7 @@ set_rtl (tree t, rtx x)
 		       || (SSAVAR (t) && TREE_CODE (SSAVAR (t)) == RESULT_DECL
 			   && !flag_tree_coalesce_vars)
 		       || !use_register_for_decl (t)
-		       || (GET_MODE (unwrap_parallel (x))
-			   == promote_ssa_mode (t, NULL)));
+		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
 
   if (x && SSAVAR (t))
     {
@@ -286,7 +274,7 @@ set_rtl (tree t, rtx x)
 	{
 	  tree var = SSA_NAME_VAR (t);
 	  /* If we don't yet have something recorded, just record it now.  */
- 	  if (!DECL_RTL_SET_P (var))
+	  if (!DECL_RTL_SET_P (var))
 	    SET_DECL_RTL (var, x);
 	  /* If we have it set already to "multiple places" don't
 	     change this.  */
@@ -6239,10 +6227,29 @@ pass_expand::execute (function *fun)
 	  rtx out = SA.partition_to_pseudo[part];
 	  gcc_assert (in == out);
 
-	  /* Extract the single expr from a PARALLEL.  We want to
-	     record the inner expr in the partition to pseudo mapping,
-	     and to use it for the sanity checks below.  */
-	  SA.partition_to_pseudo[part] = unwrap_parallel (in);
+	  /* PARMs and RESULTs are laid out before activating
+	     function-specific target attributes, some of which may
+	     affect the set of available registers and vector modes.
+	     This may in turn cause TYPE_MODE to return different
+	     modes for the same type.  Within the function, we want to
+	     use function-specific modes, so promote_ssa_name will
+	     take the vector modes unchanged, but parms and decls,
+	     that interface with the rest of the translation unit,
+	     ought to use the general interface, or so it seems.
+	     Check!  */
+	  if (VECTOR_TYPE_P (TREE_TYPE (var))
+	      && GET_MODE (in) != DECL_MODE (var)
+	      && GET_MODE (in) != BLKmode)
+	    {
+	      gcc_assert (GET_MODE_SIZE (GET_MODE (in))
+			  == GET_MODE_SIZE (DECL_MODE (var)));
+	      if (REG_P (in))
+		in = gen_rtx_SUBREG (DECL_MODE (var), in, 0);
+	      else if (MEM_P (in))
+		in = change_address (in, DECL_MODE (var), 0);
+	      else
+		gcc_unreachable ();
+	    }
 
 	  /* Now reset VAR's RTL to IN, so that the _EXPR attrs match
 	     those expected by debug backends for each parm and for
