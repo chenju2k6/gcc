@@ -4826,15 +4826,18 @@ allocate_struct_function (tree fndecl, bool abstract_p)
 
   if (fndecl != NULL_TREE)
     {
-      /* Now that we have activated any function-specific attributes
-	 that might affect layout, particularly vector modes, relayout
-	 each of the parameters and the result.  */
-      tree parm;
-      for (parm = DECL_ARGUMENTS (fndecl); parm; parm = DECL_CHAIN (parm))
-	relayout_decl (parm);
-
       tree result = DECL_RESULT (fndecl);
-      relayout_decl (result);
+
+      if (!abstract_p)
+	{
+	  /* Now that we have activated any function-specific attributes
+	     that might affect layout, particularly vector modes, relayout
+	     each of the parameters and the result.  */
+	  relayout_decl (result);
+	  for (tree parm = DECL_ARGUMENTS (fndecl); parm;
+	       parm = DECL_CHAIN (parm))
+	    relayout_decl (parm);
+	}
 
       if (!abstract_p && aggregate_value_p (result, fndecl))
 	{
