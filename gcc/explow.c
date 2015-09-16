@@ -854,28 +854,29 @@ promote_ssa_mode (const_tree name, int *punsignedp)
 {
   gcc_assert (TREE_CODE (name) == SSA_NAME);
 
-  tree type = TREE_TYPE (name);
-
   /* Partitions holding parms and results must be promoted as expected
      by function.c.  */
   if (SSA_NAME_VAR (name)
       && (TREE_CODE (SSA_NAME_VAR (name)) == PARM_DECL
 	  || TREE_CODE (SSA_NAME_VAR (name)) == RESULT_DECL))
     {
-      if (VECTOR_TYPE_P (type))
-	gcc_checking_assert (promote_decl_mode (SSA_NAME_VAR (name), punsignedp)
-			     == TYPE_MODE (type));
-      else
-	return promote_decl_mode (SSA_NAME_VAR (name), punsignedp);
+      machine_mode mode = promote_decl_mode (SSA_NAME_VAR (name), punsignedp);
+      if (mode != BLKmode)
+	return mode;
     }
 
-  machine_mode mode = VECTOR_TYPE_P (type)
-    ? type->type_common.mode : TYPE_MODE (type);
-
+  tree type = TREE_TYPE (name);
   int unsignedp = TYPE_UNSIGNED (type);
+  machine_mode mode = TYPE_MODE (type);
+
+  /* Bypass TYPE_MODE when it maps vector modes to BLKmode.  */
+  if (mode == BLKmode)
+    {
+      gcc_assert (VECTOR_TYPE_P (type));
+      mode = type->type_common.mode;
+    }
 
   machine_mode pmode = promote_mode (type, mode, &unsignedp);
-
   if (punsignedp)
     *punsignedp = unsignedp;
 
