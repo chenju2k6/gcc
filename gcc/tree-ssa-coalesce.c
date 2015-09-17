@@ -1478,13 +1478,17 @@ gimple_can_coalesce_p (tree name1, tree name2)
       if (reg1 != reg2)
 	return false;
 
-      /* Check that the promoted modes are the same.  We don't want to
-	 coalesce if the promoted modes would be different.  Only
+      /* Check that the promoted modes and unsignedness are the same.
+	 We don't want to coalesce if the promoted modes would be
+	 different, or if they would sign-extend differently.  Only
 	 PARM_DECLs and RESULT_DECLs have different promotion rules,
 	 so skip the test if both are variables, or both are anonymous
 	 SSA_NAMEs.  */
+      int unsigned1, unsigned2;
       return ((!var1 || VAR_P (var1)) && (!var2 || VAR_P (var2)))
-	|| promote_ssa_mode (name1, NULL) == promote_ssa_mode (name2, NULL);
+	|| ((promote_ssa_mode (name1, &unsigned1)
+	     == promote_ssa_mode (name2, &unsigned2))
+	    && unsigned1 == unsigned2);
     }
 
   /* If the types are not the same, check for a canonical type match.  This
