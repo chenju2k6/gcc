@@ -99,6 +99,8 @@ static rtx expand_debug_expr (tree);
 
 static bool defer_stack_allocation (tree, bool);
 
+static void record_alignment_for_reg_var (unsigned int);
+
 /* Return an expression tree corresponding to the RHS of GIMPLE
    statement STMT.  */
 
@@ -1219,6 +1221,17 @@ set_parm_rtl (tree parm, rtx x)
 {
   gcc_assert (TREE_CODE (parm) == PARM_DECL
 	      || TREE_CODE (parm) == RESULT_DECL);
+
+  if (x && !MEM_P (x))
+    {
+      unsigned int align = MINIMUM_ALIGNMENT (TREE_TYPE (parm),
+					      TYPE_MODE (TREE_TYPE (parm)),
+					      TYPE_ALIGN (TREE_TYPE (parm)));
+
+      gcc_assert (align <= MAX_SUPPORTED_STACK_ALIGNMENT);
+
+      record_alignment_for_reg_var (align);
+    }
 
   if (!is_gimple_reg (parm))
     return set_rtl (parm, x);
