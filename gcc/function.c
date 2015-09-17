@@ -2156,7 +2156,7 @@ use_register_for_decl (const_tree decl)
       if (cfun->returns_pcc_struct
 	  || (targetm.calls.struct_value_rtx
 	      (TREE_TYPE (current_function_decl), 1)))
-	return !DECL_BY_REFERENCE (decl);
+	return DECL_BY_REFERENCE (decl);
 
       /* Otherwise, we're taking an extra all.function_result_decl
 	 argument.  It's set up in assign_parms_augmented_arg_list,
