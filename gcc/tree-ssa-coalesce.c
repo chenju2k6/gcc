@@ -1492,7 +1492,12 @@ gimple_can_coalesce_p (tree name1, tree name2)
     }
 
   /* If alignment requirements are different, we can't coalesce.  */
-  if (TYPE_ALIGN (t1) != TYPE_ALIGN (t2))
+  if (MINIMUM_ALIGNMENT (t1,
+			 var1 ? DECL_MODE (var1) : TYPE_MODE (t1),
+			 var1 ? LOCAL_DECL_ALIGNMENT (var1) : TYPE_ALIGN (t1))
+      != MINIMUM_ALIGNMENT (t2,
+			    var2 ? DECL_MODE (var2) : TYPE_MODE (t2),
+			    var2 ? LOCAL_DECL_ALIGNMENT (var2) : TYPE_ALIGN (t2)))
     return false;
 
   /* If the types are not the same, check for a canonical type match.  This
