@@ -11393,6 +11393,22 @@ ix86_finalize_stack_realign_flags (void)
 	      }
 	}
 
+      frame_pointer_needed = false;
+      stack_realign = false;
+      crtl->max_used_stack_slot_alignment = incoming_stack_boundary;
+      crtl->stack_alignment_needed = incoming_stack_boundary;
+      crtl->stack_alignment_estimated = incoming_stack_boundary;
+      if (crtl->preferred_stack_boundary > incoming_stack_boundary)
+	crtl->preferred_stack_boundary = incoming_stack_boundary;
+      df_finish_pass (true);
+      df_scan_alloc (NULL);
+      df_scan_blocks ();
+      df_compute_regs_ever_live (true);
+      df_analyze ();
+    }
+
+  if (!stack_realign)
+    {
       /* If drap has been set, but it actually isn't live at the start
 	 of the function, there is no reason to set it up.  */
       if (crtl->drap_reg)
@@ -11406,19 +11422,6 @@ ix86_finalize_stack_realign_flags (void)
 	}
       else
 	cfun->machine->no_drap_save_restore = true;
-
-      frame_pointer_needed = false;
-      stack_realign = false;
-      crtl->max_used_stack_slot_alignment = incoming_stack_boundary;
-      crtl->stack_alignment_needed = incoming_stack_boundary;
-      crtl->stack_alignment_estimated = incoming_stack_boundary;
-      if (crtl->preferred_stack_boundary > incoming_stack_boundary)
-	crtl->preferred_stack_boundary = incoming_stack_boundary;
-      df_finish_pass (true);
-      df_scan_alloc (NULL);
-      df_scan_blocks ();
-      df_compute_regs_ever_live (true);
-      df_analyze ();
     }
 
   crtl->stack_realign_needed = stack_realign;
