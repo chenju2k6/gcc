@@ -5141,15 +5141,22 @@ expand_function_start (tree subr)
       tree parm = cfun->static_chain_decl;
       rtx local, chain;
       rtx_insn *insn;
+      int unsignedp;
 
-      local = gen_reg_rtx (promote_decl_mode (parm, NULL));
+      local = gen_reg_rtx (promote_decl_mode (parm, &unsignedp));
       chain = targetm.calls.static_chain (current_function_decl, true);
 
       set_decl_incoming_rtl (parm, chain, false);
       set_parm_rtl (parm, local);
       mark_reg_pointer (local, TYPE_ALIGN (TREE_TYPE (TREE_TYPE (parm))));
 
-      insn = emit_move_insn (local, chain);
+      if (GET_MODE (local) != GET_MODE (chain))
+	{
+	  convert_move (local, chain, unsignedp);
+	  insn = get_last_insn ();
+	}
+      else
+	insn = emit_move_insn (local, chain);
 
       /* Mark the register as eliminable, similar to parameters.  */
       if (MEM_P (chain)
