@@ -211,7 +211,7 @@ set_rtl (tree t, rtx x)
 		       || !use_register_for_decl (t)
 		       || GET_MODE (x) == promote_ssa_mode (t, NULL));
 
-  if (x && SSAVAR (t))
+  if (x)
     {
       bool skip = false;
       tree cur = NULL_TREE;
@@ -245,12 +245,15 @@ set_rtl (tree t, rtx x)
       else
 	gcc_unreachable ();
 
-      tree next = skip ? cur : leader_merge (cur, SSAVAR (t));
+      tree next = skip ? cur : leader_merge (cur, SSAVAR (t) ? SSAVAR (t) : t);
 
       if (cur != next)
 	{
 	  if (MEM_P (x))
-	    set_mem_attributes (x, next, true);
+	    set_mem_attributes (x,
+				next && TREE_CODE (next) == SSA_NAME
+				? TREE_TYPE (next)
+				: next, true);
 	  else
 	    set_reg_attrs_for_decl_rtl (next, x);
 	}
