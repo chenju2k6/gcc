@@ -1491,6 +1491,10 @@ gimple_can_coalesce_p (tree name1, tree name2)
 	    && unsigned1 == unsigned2);
     }
 
+  /* If alignment requirements are different, we can't coalesce.  */
+  if (TYPE_ALIGN (t1) != TYPE_ALIGN (t2))
+    return false;
+
   /* If the types are not the same, check for a canonical type match.  This
      (for example) allows coalescing when the types are fundamentally the
      same, but just have different names. 
