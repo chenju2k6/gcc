@@ -5142,7 +5142,7 @@ expand_function_start (tree subr)
       rtx local, chain;
       rtx_insn *insn;
 
-      local = gen_reg_rtx (Pmode);
+      local = gen_reg_rtx (promote_decl_mode (parm, NULL));
       chain = targetm.calls.static_chain (current_function_decl, true);
 
       set_decl_incoming_rtl (parm, chain, false);
