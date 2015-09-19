@@ -40658,11 +40658,11 @@ rdseed_step:
       if (cfun->machine->is_exception)
 	/* The address of interrupt data is at (AP) in the current
 	   frame in exception handler.  */
-	emit_insn (gen_rtx_SET (target, arg_pointer_rtx));
+	emit_insn (gen_rtx_SET (VOIDmode, target, arg_pointer_rtx));
       else
 	/* The address of interrupt data is at -WORD(AP) in the current
 	   frame in interrupt handler.  */
-	emit_insn (gen_rtx_SET (target,
+	emit_insn (gen_rtx_SET (VOIDmode, target,
 				plus_constant (Pmode, arg_pointer_rtx,
 					       -UNITS_PER_WORD)));
       return target;
