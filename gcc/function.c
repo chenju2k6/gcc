@@ -2886,7 +2886,7 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
 {
   rtx entry_parm = data->entry_parm;
   rtx stack_parm = data->stack_parm;
-  rtx concat_reg = NULL_RTX;
+  rtx target_reg = NULL_RTX;
   HOST_WIDE_INT size;
   HOST_WIDE_INT size_stored;
 
@@ -2903,9 +2903,9 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       if (GET_CODE (reg) != CONCAT)
 	stack_parm = reg;
       else
-	/* FIXME: we could try to do away with the stack slot using an
-	   unsplit pseudo of some integral mode and some shifting.  */
-	concat_reg = reg;
+	/* This will use or allocate a stack slot that we'd rather
+	   avoid.  FIXME: Could we avoid it in more cases?  */
+	target_reg = reg;
       data->stack_parm = NULL;
     }
 
@@ -3013,10 +3013,14 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
 	      tem = change_address (mem, word_mode, 0);
 	      emit_move_insn (tem, x);
 	    }
+	  else if (!MEM_P (mem))
+	    emit_move_insn (mem, entry_parm);
 	  else
 	    move_block_from_reg (REGNO (entry_parm), mem,
 				 size_stored / UNITS_PER_WORD);
 	}
+      else if (!MEM_P (mem))
+	emit_move_insn (mem, entry_parm);
       else
 	move_block_from_reg (REGNO (entry_parm), mem,
 			     size_stored / UNITS_PER_WORD);
@@ -3031,10 +3035,10 @@ assign_parm_setup_block (struct assign_parm_data_all *all,
       end_sequence ();
     }
 
-  if (concat_reg)
+  if (target_reg)
     {
-      emit_move_insn (concat_reg, stack_parm);
-      stack_parm = concat_reg;
+      emit_move_insn (target_reg, stack_parm);
+      stack_parm = target_reg;
     }
 
   data->stack_parm = stack_parm;
